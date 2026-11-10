@@ -1,0 +1,68 @@
+name: Build TapeBox VST3
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows, os: windows-latest }
+          - { name: macOS,   os: macos-latest }
+          - { name: Linux,   os: ubuntu-latest }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libxinerama-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxcomposite-dev libfreetype-dev \
+            libfontconfig1-dev libgl1-mesa-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect VST3
+        run: |
+          mkdir -p dist
+          cp -R "$(find build -type d -name TapeBox.vst3 | head -n 1)" dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TapeBox-VST3-${{ matrix.name }}
+          path: dist
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Zip
+        run: |
+          cd artifacts
+          for d in */; do (cd "$d" && zip -r "../${d%/}.zip" .); done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
